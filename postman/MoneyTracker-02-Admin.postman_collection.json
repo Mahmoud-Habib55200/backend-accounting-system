@@ -1,0 +1,538 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-0002-4000-8000-moneytracker02",
+    "name": "Money Tracker API — 02 Admin (لوحة التحكم)",
+    "description": "# 🛡️ Money Tracker API — كولكشن الأدمن\n\nendpoints لوحة تحكم الأدمن: إدارة المستخدمين والاشتراكات والتحليلات.\n**عدد الطلبات:** 11 طلب في 3 فولدرات.\n\n---\n\n## 🚀 إزاي تبدأ\n\n### 1️⃣ اعمل حساب أدمن\n**الطريقة الصح (من التيرمنال):**\n```bash\nnode scripts/createAdmin.js\n```\nالسكريبت ده موجود في المشروع وبينشئ الأدمن مباشرة في الداتابيز.\n\n**أو (للتجربة بس):** استخدم طلب **Seed Admin** — بس اقرا التحذير الأمني اللي جواه الأول! 🚨\n\n### 2️⃣ اعمل Login\nنفّذ **Admin Login** — التوكن هيتحفظ أوتوماتيك في `{{adminToken}}`.\n\n> ⏱️ **مهم جداً:** توكن الأدمن صلاحيته **30 دقيقة بس**. لو جالك `401` فجأة، اعمل Login تاني.\n\n---\n\n## 🔐 إزاي بيتم فصل صلاحيات الأدمن؟\nالفرق كله في **الـ JWT payload**:\n\n| | payload | الصلاحية |\n|---|---|---|\n| مستخدم | `{ id }` | 24 ساعة / 30 يوم |\n| أدمن | `{ id, role: \"admin\" }` | **30 دقيقة** |\n\nوالميدل وير `adminAuth` بيرفض أي توكن مفيهوش `role: \"admin\"` بـ `403 Forbidden`.\n\n> 🎓 **جرّب بنفسك:** حط توكن مستخدم عادي في `{{adminToken}}` وشوف الـ 403.\n\n---\n\n## 📦 المتغيرات\n| المتغير | بيتملى إزاي |\n|---|---|\n| `baseUrl` | **أنت** بتحطه |\n| `adminToken` | أوتوماتيك بعد Admin Login |\n| `targetUserId` | أوتوماتيك بعد Get Users أو Create User |\n\n---\n\n## 🗺️ الترتيب المقترح\n```\n01 Admin Login       → خد التوكن\n02 Get Users         → شوف اليوزرز (وهياخد أول id تلقائياً)\n02 Create User       → اعمل يوزر باشتراك\n02 Update Sub        → جرّب الـ 4 طرق لتعديل الاشتراك\n02 Suspend/Activate  → أوقف وفعّل\n02 Get Logs          → شوف سجل العمليات\n03 Stats             → إحصائيات سريعة\n03 Dashboard         → التحليلات الكاملة\n```\n\n---\n\n## 📅 مدد الاشتراكات (`calcEnd`)\n| النوع | المدة | السعر (hard-coded) |\n|---|---|---|\n| `trial` | 14 يوم | 0 |\n| `3months` | 3 شهور | 1999 |\n| `6months` | 6 شهور | 2999 |\n| `yearly` | سنة | 4999 |\n| `custom` | `customDays` (افتراضي 30) | 0 |\n\n---\n\n## 🏷️ حالات المستخدم (`_status`)\nحقل **محسوب** مش متخزن — بيتحسب بالأولوية دي:\n1. `suspended` — موقوف يدوياً\n2. `active` — لو مفيش `subscriptionEnd` خالص\n3. `expired` — التاريخ عدّى\n4. `expiring` — باقي أقل من 7 أيام\n5. `active` — غير كده\n\n---\n\n## 🚨 تحذيرات أمنية في الكود (مقصودة كتمارين)\n| # | المشكلة | فين |\n|---|---|---|\n| 1 | راوت `seed` مفتوح للعامة | `POST /api/admin/auth/seed` |\n| 2 | مفيش rate limit على دخول الأدمن | `POST /api/admin/auth/login` |\n| 3 | إيقاف اليوزر مبيبطّلش توكنه | `POST /users/:id/suspend` |\n| 4 | مفيش pagination في قائمة اليوزرز | `GET /users` |\n| 5 | الـ regex في البحث ممكن يسبب ReDoS | `GET /users?search=` |\n| 6 | الأسعار hard-coded في الكود | `GET /dashboard` |\n| 7 | الباسورد بيتبعت في الإيميل نصاً صريحاً | `POST /users` |\n\n> 🎯 اقروا تفاصيل كل واحدة في وصف الطلب نفسه، وحاولوا تصلّحوها.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{adminToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "targetUserId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 — 🔑 Admin Auth (دخول الأدمن)",
+      "description": "تسجيل دخول الأدمن + إنشاء أول أدمن.\n\n**Base path:** `/api/admin/auth`\n\n### ⚠️ الراوتين دول **مفتوحين للعامة** (قبل `router.use(adminAuth)`)\nابدأ من هنا: اعمل **Login** وهياخد التوكن ويحفظه في `{{adminToken}}` أوتوماتيك.",
+      "item": [
+        {
+          "name": "Admin Login — دخول الأدمن",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "## تسجيل دخول الأدمن\n\n`POST /api/admin/auth/login` — **مفتوح للعامة**\n\n### 📥 Body\n| الحقل | النوع | مطلوب؟ |\n|---|---|---|\n| `email` | String | ✅ |\n| `password` | String | ✅ |\n\n### 🔑 الفرق الجوهري عن دخول المستخدم\nالـ JWT payload هنا فيه **`role`**:\n```js\njwt.sign({ id: admin._id, role: \"admin\" }, JWT_SECRET, { expiresIn: \"30m\" })\n```\nمقابل توكن المستخدم العادي: `{ id: user._id }` من غير `role`.\n\n> 🎓 عشان كده مستحيل مستخدم عادي يستخدم توكنه على راوتس الأدمن — الـ `adminAuth` بيرفض أي توكن مفيهوش `role: \"admin\"`.\n\n### ⏱️ الصلاحية: 30 دقيقة بس\nأقصر بكتير من المستخدم العادي — لأن صلاحيات الأدمن خطيرة، فلو التوكن اتسرّق يبقى الضرر محدود.\n\n### 📤 Response — 200 OK\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"admin\": {\n      \"_id\": \"6600...\",\n      \"name\": \"Mahmoud\",\n      \"email\": \"admin@example.com\"\n    }\n  }\n}\n```\n> 🔎 لاحظ إن بيانات الأدمن بترجع **منتقاة يدوياً** (`_id`, `name`, `email`) — مش الدوكيومنت كله. أنضف وأأمن.\n\n### ❌ الأخطاء\n| الكود | الحالة | الرسالة |\n|---|---|---|\n| `401` | إيميل أو باسورد غلط | `بيانات خاطئة` |\n\n### ⚠️ ملاحظة أمنية\n**مفيش rate limit ولا brute-force protection** على دخول الأدمن — على عكس دخول المستخدم العادي اللي عليه الاتنين!\n> 🎯 **تحدّي:** ضيف `loginLimiter` على الراوت ده.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"Admin@1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.token) {",
+                  "  pm.collectionVariables.set(\"adminToken\", res.data.token);",
+                  "  console.log(\"✅ adminToken saved (صالح 30 دقيقة بس)\");",
+                  "}",
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Seed Admin — إنشاء أول أدمن ⚠️",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/auth/seed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "auth",
+                "seed"
+              ]
+            },
+            "description": "## إنشاء حساب أدمن (Seed)\n\n`POST /api/admin/auth/seed` — **مفتوح للعامة!**\n\n### 🚨🚨 ثغرة أمنية خطيرة — مقصودة كتمرين 🚨🚨\nالتعليق في الكود نفسه بيقول:\n```js\nrouter.post(\"/auth/seed\", c.seedAdmin);   // remove in production\n```\n\n**المشكلة:** أي حد على الإنترنت يقدر يبعت الطلب ده وياخد **صلاحيات أدمن كاملة** على السيستم:\n- يشوف بيانات كل المستخدمين\n- يوقف أي حساب\n- يغيّر الاشتراكات\n\n**الحل الصح:** اعمل الأدمن من سكريبت محلي:\n```bash\nnode scripts/createAdmin.js\n```\nوالسكريبت ده موجود فعلاً في المشروع في مجلد `scripts/`! فالراوت ده أصلاً **زيادة عن اللزوم**.\n\n### 📥 Body\n| الحقل | النوع | مطلوب؟ |\n|---|---|---|\n| `name` | String | ✅ |\n| `email` | String | ✅ |\n| `password` | String | ✅ |\n\n> ⚠️ الكود بيعمل `Admin.create(req.body)` — **mass assignment**. يعني تقدر تبعت `role` كمان.\n\n### 📤 Response — 201 Created\n```json\n{ \"success\": true, \"data\": { \"_id\": \"6600...\", \"email\": \"admin@example.com\" } }\n```\n\n### ❌ الأخطاء\n| الكود | الحالة | الرسالة |\n|---|---|---|\n| `409` | الأدمن موجود | `Admin already exists` |\n\n> ⚠️ التحقق على **الإيميل** بس — يعني تقدر تعمل أدمنز كتير بإيميلات مختلفة.\n\n### 🎯 تحدّي للطلبة\n1. شيل الراوت ده من `routes/admin.js`.\n2. أو حطّه ورا شرط `if (process.env.NODE_ENV !== \"production\")`.\n3. أو خليه يشتغل مرة واحدة بس (لو `Admin.countDocuments() === 0`).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Super Admin\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"Admin@1234\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 — 👥 User Management (إدارة المستخدمين)",
+      "description": "إدارة المستخدمين واشتراكاتهم.\n\n**Base path:** `/api/admin/users`\n\n### 🏷️ حالة المستخدم (`_status`) — حقل محسوب\nالحقل ده **مش متخزن في الداتابيز** — بيتحسب في كل request بدالة `userStatus`:\n```js\nif (user.isSuspended) return \"suspended\";\nif (!user.subscriptionEnd) return \"active\";\nif (now > end) return \"expired\";\nif (end - now < 7 يوم) return \"expiring\";\nreturn \"active\";\n```\n\n| الحالة | المعنى |\n|---|---|\n| `suspended` | موقوف يدوياً من الأدمن (أعلى أولوية) |\n| `expired` | الاشتراك خلص |\n| `expiring` | باقي **أقل من 7 أيام** |\n| `active` | شغّال |\n\n### 📅 حساب تاريخ نهاية الاشتراك (`calcEnd`)\n| `subscriptionType` | المدة |\n|---|---|\n| `trial` | **14 يوم** |\n| `3months` | 3 شهور |\n| `6months` | 6 شهور |\n| `yearly` | سنة |\n| `custom` | `customDays` يوم (الافتراضي 30) |\n\n### 📝 سجل العمليات (AdminLog)\nكل عملية أدمن بتتسجّل في `AdminLog` بـ: `admin`, `user`, `action`, `details`, `reason`.\nالـ actions المسموحة: `create_user` · `extend_subscription` · `change_plan` · `add_free_days` · `suspend` · `activate` · `manual_date`",
+      "item": [
+        {
+          "name": "Get Users — قائمة المستخدمين (مع بحث وفلترة)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users?plan=all&status=all&sort=expiring_first",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "بحث في الاسم أو الإيميل (regex, case-insensitive)",
+                  "disabled": true
+                },
+                {
+                  "key": "plan",
+                  "value": "all",
+                  "description": "all | trial | 3months | 6months | yearly | custom",
+                  "disabled": false
+                },
+                {
+                  "key": "status",
+                  "value": "all",
+                  "description": "all | active | expiring | expired | suspended (فلترة في الذاكرة)",
+                  "disabled": false
+                },
+                {
+                  "key": "sort",
+                  "value": "expiring_first",
+                  "description": "expiring_first (الافتراضي) — بيرتّب: expiring → expired → active → suspended",
+                  "disabled": false
+                }
+              ]
+            },
+            "description": "## قائمة كل المستخدمين\n\n`GET /api/admin/users?plan=all&status=all&sort=expiring_first`\n\n### 📥 Query Params\n| الباراميتر | القيم | الشرح |\n|---|---|---|\n| `search` | String | بحث بالاسم **أو** الإيميل بـ regex غير حسّاس لحالة الأحرف |\n| `plan` | `all` \\| `trial` \\| `3months` \\| `6months` \\| `yearly` \\| `custom` | فلترة في **الداتابيز** |\n| `status` | `all` \\| `active` \\| `expiring` \\| `expired` \\| `suspended` | فلترة في **الذاكرة** (بعد الجلب) |\n| `sort` | `expiring_first` | الترتيب الافتراضي |\n\n### 🔎 فرق مهم في الفلترة\n```js\nif (plan) query.subscriptionType = plan;      // في MongoDB ✅\n// ...\nusers = users.filter(u => u._status === statusFilter);  // في Node ⚠️\n```\nالفلترة بالـ `status` **مش** بتقلل حجم الكويري — بيجيب كل اليوزرز من الداتابيز الأول وبعدين يفلتر.\n**ليه؟** لأن `_status` حقل محسوب مش متخزن. لو عندك 100 ألف يوزر، ده مشكلة أداء حقيقية.\n\n### 🔍 خطر الـ regex في البحث\n```js\nquery.$or = [{ name: { $regex: search, $options: \"i\" } }, ...]\n```\nالمستخدم بيتحكّم في الـ regex مباشرة — يعني ممكن يبعت regex معقّد يستنزف السيرفر (**ReDoS**).\n> 🎯 **الحل:** اعمل escape للحروف الخاصة قبل بناء الـ regex.\n\n### 📊 الترتيب `expiring_first`\n```js\nconst order = { expiring: 0, expired: 1, active: 2, suspended: 3 };\n```\nمنطق تجاري ذكي: **اللي قرب يخلص أهم حاجة** (فرصة تجديد)، بعده اللي خلص (فرصة استرجاع).\n\n### 📤 Response — 200 OK\n```json\n{\n  \"success\": true,\n  \"data\": [\n    {\n      \"_id\": \"65f0...\",\n      \"name\": \"Ahmed Ali\",\n      \"email\": \"student1@example.com\",\n      \"phone\": \"01012345678\",\n      \"locale\": \"ar\",\n      \"subscriptionType\": \"trial\",\n      \"subscriptionStart\": \"...\",\n      \"subscriptionEnd\": \"...\",\n      \"isSuspended\": false,\n      \"_status\": \"expiring\"\n    }\n  ]\n}\n```\n> ⚠️ **مفيش pagination** — بيرجّع كل اليوزرز.\n> ⚠️ حقل `avatar` (base64) بيرجع كمان — يعني الريسبونس ممكن يبقى **ضخم جداً** لو ناس كتير رافعة صور.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.length) {",
+                  "  pm.collectionVariables.set(\"targetUserId\", res.data[0]._id);",
+                  "  console.log(\"✅ targetUserId saved:\", res.data[0]._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create User — إنشاء مستخدم من لوحة الأدمن",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ]
+            },
+            "description": "## إنشاء مستخدم باشتراك مدفوع\n\n`POST /api/admin/users`\n\nالفرق عن `/api/auth/register`: هنا الأدمن بيحدد **الاشتراك** من الأول، وبيتبعت إيميل ترحيبي فيه الباسورد.\n\n### 📥 Body\n| الحقل | النوع | مطلوب؟ | الافتراضي | الشرح |\n|---|---|---|---|---|\n| `firstName` | String | ✅ | — | |\n| `lastName` | String | ❌ | `\"\"` | بيتدمج مع الأول: `` `${firstName} ${lastName}`.trim() `` |\n| `email` | String | ✅ | — | lowercase + trim |\n| `phone` | String | ❌ | `\"\"` | |\n| `password` | String | ✅ | — | **6 حروف على الأقل** |\n| `subscriptionType` | String (enum) | ❌ | `trial` | `trial` \\| `3months` \\| `6months` \\| `yearly` \\| `custom` |\n| `customDays` | Number | ❌ | `30` | مع `custom` بس |\n| `subscriptionStart` | Date | ❌ | النهاردة | تاريخ بداية الاشتراك |\n\n> ⚠️ **عدم اتساق في شروط الباسورد:** هنا **6 حروف** بس من غير شروط تعقيد، بينما `PUT /api/settings/password` بيطلب 8 حروف + حرف كبير + رقم.\n\n### 📧 إيميل الترحيب\n```js\ntry { await sendWelcomeEmail(email, user.name, password, end); } catch { }\n```\n> 🎓 **نقطة مهمة:** الـ `try/catch` الفاضي مقصود — لو الإيميل فشل، اليوزر **بيتعمل برضه** والرد بينجح.\n> ده **صح** (مش عايز تفشّل العملية كلها عشان إيميل)، بس المفروض على الأقل تعمل log للخطأ.\n> ⚠️ وكمان: الإيميل بيتبعت فيه **الباسورد نصاً صريحاً** — ممارسة سيئة أمنياً. الأفضل رابط تفعيل.\n\n### 📤 Response — 201 Created\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"_id\": \"6601...\",\n    \"name\": \"Mohamed Hassan\",\n    \"email\": \"newstudent@example.com\",\n    \"subscriptionType\": \"3months\",\n    \"subscriptionStart\": \"2026-09-01T00:00:00.000Z\",\n    \"subscriptionEnd\": \"2026-12-01T00:00:00.000Z\",\n    \"_status\": \"active\"\n  }\n}\n```\n\n### ❌ الأخطاء\n| الكود | الحالة | الرسالة |\n|---|---|---|\n| `400` | `firstName` أو `email` ناقص | `الاسم الأول والإيميل مطلوبان` |\n| `400` | الباسورد أقل من 6 | `كلمة المرور يجب أن تكون 6 أحرف على الأقل` |\n| `409` | الإيميل مستخدم | `الإيميل مستخدم بالفعل` |\n\n### 📝 اللوج\nبيتسجّل `AdminLog` بـ `action: \"create_user\"` وسبب: `إنشاء حساب جديد`.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Mohamed\",\n  \"lastName\": \"Hassan\",\n  \"email\": \"newstudent@example.com\",\n  \"phone\": \"01098765432\",\n  \"password\": \"Student@123\",\n  \"subscriptionType\": \"3months\",\n  \"subscriptionStart\": \"2026-09-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set(\"targetUserId\", res.data._id);",
+                  "  console.log(\"✅ targetUserId saved:\", res.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User — بيانات مستخدم واحد",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{targetUserId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{targetUserId}}"
+              ]
+            },
+            "description": "## بيانات مستخدم واحد\n\n`GET /api/admin/users/:id`\n\nبيرجّع اليوزر بكل بياناته (ما عدا الباسورد) + حقل `_status` المحسوب.\n\n### 📤 Response — 200 OK\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"_id\": \"65f0...\",\n    \"name\": \"Ahmed Ali\",\n    \"email\": \"student1@example.com\",\n    \"phone\": \"01012345678\",\n    \"avatar\": \"\",\n    \"locale\": \"ar\",\n    \"subscriptionType\": \"3months\",\n    \"subscriptionStart\": \"...\",\n    \"subscriptionEnd\": \"...\",\n    \"isSuspended\": false,\n    \"createdAt\": \"...\",\n    \"_status\": \"active\"\n  }\n}\n```\n\n### ❌ الأخطاء\n| الكود | الرسالة |\n|---|---|\n| `404` | `المستخدم غير موجود` |\n\n> ⚠️ الراوت ده بيرجّع بيانات اليوزر بس — **مش** بيرجّع بياناته المالية (مصاريفه/حساباته). خصوصية اليوزر محفوظة.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Subscription — تعديل الاشتراك",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{targetUserId}}/subscription",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "subscription"
+              ]
+            },
+            "description": "## تعديل اشتراك المستخدم\n\n`PUT /api/admin/users/:id/subscription`\n\n### 🎯 الراوت ده بيعمل **4 عمليات مختلفة** حسب اللي تبعته\nالكود بيتشيّك بالترتيب ده (**أول شرط يتحقق هو اللي بيشتغل، والباقي بيتتجاهل**):\n\n| # | لو بعتّ | الـ action | اللي بيحصل |\n|---|---|---|---|\n| 1 | `subscriptionEnd` | `manual_date` | بيحط التاريخ ده مباشرة |\n| 2 | `extensionDays` | `extend_subscription` | بيزوّد N يوم |\n| 3 | `freeDays` | `add_free_days` | بيزوّد N يوم (نفس المنطق، اسم مختلف للتقارير) |\n| 4 | `subscriptionType` | `change_plan` | خطة جديدة تبدأ **من النهاردة** |\n\n### 📥 Body — كل الحقول اختيارية\n| الحقل | النوع | الشرح |\n|---|---|---|\n| `subscriptionEnd` | Date | تاريخ نهاية يدوي (أعلى أولوية) |\n| `extensionDays` | Number | عدد أيام التمديد |\n| `freeDays` | Number | عدد أيام مجانية (تعويض مثلاً) |\n| `subscriptionType` | String (enum) | `trial` \\| `3months` \\| `6months` \\| `yearly` \\| `custom` |\n| `customDays` | Number | مع `custom` بس |\n| `reason` | String | **سبب التعديل** — بيتسجّل في `AdminLog`. أقصى 500 حرف. |\n\n### 🧮 منطق التمديد الذكي\n```js\nconst base = user.subscriptionEnd && user.subscriptionEnd > new Date()\n  ? user.subscriptionEnd   // لسه شغال → مدّد من تاريخ النهاية\n  : new Date();            // خلص → ابدأ من النهاردة\n```\n> 🎓 **ده منطق تجاري مهم:** لو اشتراكك لسه شغال، الأيام الجديدة بتتضاف لنهايته (مش بتضيع). لو خلص، بتبدأ من النهاردة.\n\n### 📧 إيميل\nبيتبعت إيميل تلقائي بالخطة الجديدة وتاريخ النهاية (جوه `try/catch` صامت).\n\n### 📤 Response — 200 OK\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"_id\": \"65f0...\",\n    \"subscriptionType\": \"6months\",\n    \"subscriptionStart\": \"2026-09-02T...\",\n    \"subscriptionEnd\": \"2027-03-02T...\",\n    \"_status\": \"active\"\n  }\n}\n```\n\n### ❌ الأخطاء\n| الكود | الرسالة |\n|---|---|\n| `404` | `المستخدم غير موجود` |\n\n### 🧪 جرّب الأربع حالات\n```json\n// 1) خطة جديدة\n{ \"subscriptionType\": \"yearly\", \"reason\": \"دفع سنوي\" }\n\n// 2) تمديد 30 يوم\n{ \"extensionDays\": 30, \"reason\": \"تمديد بعد الدفع\" }\n\n// 3) 7 أيام مجانية تعويض\n{ \"freeDays\": 7, \"reason\": \"تعويض عن عطل السيرفر\" }\n\n// 4) تاريخ يدوي\n{ \"subscriptionEnd\": \"2027-12-31\", \"reason\": \"اتفاق خاص\" }\n\n// 5) خطة مخصصة 45 يوم\n{ \"subscriptionType\": \"custom\", \"customDays\": 45, \"reason\": \"عرض خاص\" }\n```\n> ⚠️ لو بعتّ `subscriptionEnd` **و** `subscriptionType` مع بعض، هيشتغل `subscriptionEnd` بس.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscriptionType\": \"6months\",\n  \"reason\": \"تجديد بعد الدفع\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Suspend User — إيقاف حساب",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{targetUserId}}/suspend",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "suspend"
+              ]
+            },
+            "description": "## إيقاف حساب مستخدم\n\n`POST /api/admin/users/:id/suspend`\n\n### 📥 Body\n| الحقل | النوع | مطلوب؟ | الشرح |\n|---|---|---|---|\n| `reason` | String | ❌ | سبب الإيقاف — بيتسجّل في `AdminLog` |\n\n### ⚙️ اللي بيحصل\nبيحط `isSuspended = true` بس. ده معناه:\n- ❌ **مش هيقدر يعمل login** → `403 ACCOUNT_SUSPENDED`\n- ✅ التوكن القديم بتاعه **لسه شغال**! ⚠️\n\n### 🚨 ثغرة مهمة جداً — لازم تفهمها\nالميدل وير `auth` بيتحقق من **الـ JWT بس** — مش بيسأل الداتابيز:\n```js\nconst payload = jwt.verify(token, JWT_SECRET);\nreq.userId = payload.id;\nnext();   // ← مفيش أي فحص لـ isSuspended\n```\n**النتيجة:** يوزر موقوف ومعاه توكن `rememberMe` (30 يوم) يقدر يفضل يستخدم السيستم **شهر كامل** بعد الإيقاف!\n\n**الحلول الممكنة:**\n1. الـ auth middleware يجيب اليوزر من الداتابيز ويتشيّك على `isSuspended` (بيكلّف كويري لكل request).\n2. blacklist للتوكنات في Redis.\n3. تقصير مدة التوكن + refresh tokens.\n\n> 🎯 **تحدّي:** نفّذ الحل الأول وقيس الفرق في زمن الاستجابة.\n\n### 📤 Response — 200 OK\n```json\n{ \"success\": true, \"data\": { \"_id\": \"...\", \"isSuspended\": true, \"_status\": \"suspended\" } }\n```\n\n### ❌ الأخطاء\n| الكود | الرسالة |\n|---|---|\n| `404` | `المستخدم غير موجود` |\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"مخالفة شروط الاستخدام\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Activate User — تفعيل حساب موقوف",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{targetUserId}}/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "activate"
+              ]
+            },
+            "description": "## تفعيل حساب موقوف\n\n`POST /api/admin/users/:id/activate`\n\nعكس `suspend` بالظبط — بيحط `isSuspended = false`.\n\n### 📥 Body\n| الحقل | النوع | مطلوب؟ |\n|---|---|---|\n| `reason` | String | ❌ |\n\n### 📤 Response — 200 OK\n```json\n{ \"success\": true, \"data\": { \"isSuspended\": false, \"_status\": \"active\" } }\n```\n\n> 🔎 لاحظ فرق بسيط: `suspend` بيرجّع `_status: \"suspended\"` **ثابت**، بينما `activate` بيعيد حساب `userStatus(user)` — يعني ممكن يرجّع `expired` لو اشتراكه خلص وهو موقوف.\n> **ده تفصيلة صح** — التفعيل مش معناه إن الاشتراك شغال.\n\n### ❌ الأخطاء\n| الكود | الرسالة |\n|---|---|\n| `404` | `المستخدم غير موجود` |\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"تم حل المشكلة\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get User Logs — سجل عمليات الأدمن على المستخدم",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/{{targetUserId}}/logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "{{targetUserId}}",
+                "logs"
+              ]
+            },
+            "description": "## سجل عمليات الأدمن على مستخدم معيّن\n\n`GET /api/admin/users/:id/logs`\n\nبيرجّع كل الـ `AdminLog` الخاصة باليوزر ده، مرتّبة بالأحدث، مع بيانات الأدمن اللي عمل العملية (populated).\n\n### 📤 Response — 200 OK\n```json\n{\n  \"success\": true,\n  \"data\": [\n    {\n      \"_id\": \"6602...\",\n      \"admin\": { \"_id\": \"6600...\", \"name\": \"Mahmoud\", \"email\": \"admin@example.com\" },\n      \"user\": \"65f0...\",\n      \"action\": \"extend_subscription\",\n      \"details\": { \"reason\": \"تمديد بعد الدفع\", \"days\": \"30\" },\n      \"reason\": \"تمديد بعد الدفع\",\n      \"createdAt\": \"2026-09-02T12:00:00.000Z\"\n    }\n  ]\n}\n```\n\n### 🏷️ أنواع الـ actions\n| القيمة | المعنى |\n|---|---|\n| `create_user` | إنشاء حساب |\n| `change_plan` | تغيير الخطة |\n| `extend_subscription` | تمديد |\n| `add_free_days` | أيام مجانية |\n| `manual_date` | تاريخ نهاية يدوي |\n| `suspend` | إيقاف |\n| `activate` | تفعيل |\n\n### 🎓 ليه الـ Audit Log مهم؟\n- **المساءلة:** مين عمل إيه وإمتى وليه.\n- **حل النزاعات:** \"ليه اشتراكي اتغيّر؟\" → عندك الإجابة.\n- **الامتثال (Compliance):** مطلوب قانونياً في أنظمة كتير.\n\n> 💡 الحقل `details` نوعه `Schema.Types.Mixed` — يعني بيقبل أي شكل JSON. مرن، بس معناه إنك مش هتقدر تعمل عليه validation ولا index.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 — 📊 Admin Analytics (إحصائيات ولوحة التحكم)",
+      "description": "endpointين للتحليلات: واحد بسيط وواحد ضخم.\n\n| الراوت | الحجم | الاستخدام |\n|---|---|---|\n| `GET /api/admin/stats` | صغير | كروت سريعة |\n| `GET /api/admin/dashboard` | ضخم جداً | لوحة تحكم كاملة |\n\n> ⚠️ الاتنين بيجيبوا **كل** اليوزرز من الداتابيز وبيحسبوا في الذاكرة (`Array.filter`) — بيشتغل كويس لحد بضع آلاف يوزر، وبعدها محتاج aggregation pipelines.",
+      "item": [
+        {
+          "name": "Stats — إحصائيات سريعة",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "stats"
+              ]
+            },
+            "description": "## إحصائيات سريعة\n\n`GET /api/admin/stats`\n\n### 📥 Query Params\nمفيش.\n\n### 📤 Response — 200 OK\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"total\": 150,\n    \"active\": 120,\n    \"suspended\": 5,\n    \"expired\": 25,\n    \"expiring\": 8,\n    \"trial\": 40,\n\n    \"monthly\": [\n      { \"month\": \"أبريل\", \"count\": 12 },\n      { \"month\": \"مايو\",  \"count\": 18 }\n    ],\n\n    \"planDist\": [\n      { \"plan\": \"تجريبي\", \"count\": 40 },\n      { \"plan\": \"3 أشهر\",  \"count\": 55 },\n      { \"plan\": \"6 أشهر\",  \"count\": 30 },\n      { \"plan\": \"سنة\",     \"count\": 20 },\n      { \"plan\": \"مخصص\",   \"count\": 5 }\n    ],\n\n    \"expiringUsers\": [\n      { \"_id\": \"...\", \"name\": \"Ahmed\", \"email\": \"...\", \"subscriptionType\": \"3months\", \"subscriptionEnd\": \"...\" }\n    ]\n  }\n}\n```\n\n### 📖 شرح الحقول\n| الحقل | الحساب |\n|---|---|\n| `total` | كل اليوزرز |\n| `suspended` | `isSuspended === true` |\n| `expired` | مش موقوف + `subscriptionEnd` عدّت |\n| `expiring` | مش موقوف + باقي **أقل من 7 أيام** ولسه ما خلصش |\n| `trial` | `subscriptionType === \"trial\"` ومش موقوف |\n| `active` | `total - suspended - expired` |\n| `monthly` | مستخدمين جدد في آخر **6 شهور**. أسماء الشهور **بالعربي** (`toLocaleString(\"ar-EG\")`) |\n| `planDist` | توزيع الخطط بأسماء عربية |\n| `expiringUsers` | أول **10** يوزرز هيخلص اشتراكهم في الأسبوع الجاي |\n\n### ⚠️ ملاحظة على حساب `active`\n```js\nconst active = total - suspended - expired;\n```\nطرح بسيط، وشغّال لأن الفئات متنافية (الـ `expired` بيستثني الموقوفين).\n> بس لو الشروط اتغيّرت في المستقبل، الحساب ده هيبوظ بصمت. **الأأمن:** عدّ الـ active مباشرةً بشرط صريح.\n\n### 🌍 ملاحظة عن التوطين (i18n)\nالباك إند بيرجّع أسماء الشهور والخطط **بالعربي جاهزة**. ده بيسهّل الفرونت بس بيصعّب دعم لغات تانية.\n> 🎯 **الأفضل:** رجّع مفاتيح (`\"trial\"`, month index) وسيب الترجمة للفرونت.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard — لوحة تحكم الأدمن الكاملة",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "dashboard"
+              ]
+            },
+            "description": "## لوحة تحكم الأدمن الكاملة\n\n`GET /api/admin/dashboard`\n\n**أضخم endpoint في السيستم كله.** بيرجّع تحليلات أعمال كاملة في request واحدة.\n\n### 💰 الأسعار (hard-coded في الكود!)\n```js\nconst PRICES = { \"3months\": 1999, \"6months\": 2999, \"yearly\": 4999, trial: 0, custom: 0 };\n```\n> ⚠️ الأسعار مكتوبة **جوه الـ controller**. أي تغيير في السعر = تعديل كود + إعادة نشر.\n> **الأفضل:** كوليكشن `Plan` في الداتابيز أو ملف config.\n> ⚠️ كمان: الإيرادات بتتحسب من **الاشتراكات النشطة × السعر الحالي** — مش من مدفوعات حقيقية. مفيش موديل `Payment` في السيستم!\n\n### 📤 Response — 200 OK (ضخم)\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"kpis\": {\n      \"total\": 150, \"active\": 120, \"expired\": 25, \"suspended\": 5,\n      \"trial\": 40, \"converted\": 110, \"conversionRate\": 73.3,\n      \"thisMonthNew\": 12, \"lastMonthNew\": 18, \"totalMoM\": -33.3,\n      \"churnCount\": 25\n    },\n\n    \"monthly\": [ { \"label\": \"سبت 26\", \"count\": 12, \"y\": 2026, \"m\": 8 } ],\n    \"weekly\":  [ { \"label\": \"أسبوع 12\", \"count\": 3 } ],\n\n    \"planDist\": [\n      { \"type\": \"3months\", \"plan\": \"3 أشهر\", \"count\": 55, \"activeCount\": 50, \"revenue\": 99950 }\n    ],\n\n    \"revenue\": {\n      \"byPlan\": [ { \"plan\": \"3 أشهر\", \"type\": \"3months\", \"price\": 1999, \"count\": 50, \"revenue\": 99950 } ],\n      \"total\": 289900,\n      \"expected\": 45000,\n      \"upcoming\": [ { \"_id\": \"...\", \"name\": \"Ahmed\", \"daysLeft\": 5, \"expectedRevenue\": 1999 } ]\n    },\n\n    \"funnel\": { \"enteredTrial\": 150, \"completedTrial\": 30, \"converted\": 110, \"notConverted\": 0 },\n    \"unconvertedList\": [ { \"_id\": \"...\", \"name\": \"...\", \"email\": \"...\", \"phone\": \"...\", \"subscriptionEnd\": \"...\" } ],\n\n    \"atRisk\": [ { \"_id\": \"...\", \"name\": \"...\", \"daysLeft\": 3, \"subscriptionType\": \"3months\" } ],\n\n    \"churned\": {\n      \"recent\": [ { \"_id\": \"...\", \"name\": \"...\", \"daysSince\": 5 } ],\n      \"old\":    [ { \"_id\": \"...\", \"name\": \"...\", \"daysSince\": 92 } ]\n    },\n\n    \"featureUsage\": [\n      { \"name\": \"الداشبورد\", \"count\": 120, \"pct\": 100 },\n      { \"name\": \"تسجيل المصاريف\", \"count\": 95, \"pct\": 79 }\n    ],\n\n    \"heatmap\": [ { \"day\": 0, \"hour\": 0, \"count\": 2 } ],\n    \"maxHeat\": 45,\n\n    \"recentLogs\": [\n      { \"_id\": \"...\", \"action\": \"extend_subscription\", \"details\": { }, \"createdAt\": \"...\", \"adminName\": \"Mahmoud\", \"userName\": \"Ahmed\", \"userEmail\": \"...\" }\n    ]\n  }\n}\n```\n\n### 📖 شرح كل قسم بالتفصيل\n\n#### 1️⃣ `kpis` — المؤشرات الرئيسية\n| الحقل | المعنى |\n|---|---|\n| `conversionRate` | `(converted / total) × 100` — نسبة اللي حوّلوا من trial لمدفوع |\n| `totalMoM` | نمو الشهر ده مقارنة باللي فات (%). **`null`** لو الشهر اللي فات كان صفر |\n| `churnCount` | إجمالي اللي اشتراكهم خلص وما جددوش |\n\n#### 2️⃣ `monthly` / `weekly` — النمو\n12 شهر + 12 أسبوع للخلف. لاحظ إن `monthly` بيرجّع `y` و`m` كمان — مفيد للـ drill-down.\n\n#### 3️⃣ `revenue` — الإيرادات\n| الحقل | المعنى |\n|---|---|\n| `total` | الاشتراكات النشطة × سعر كل خطة |\n| `expected` | الإيراد المتوقع من التجديدات في **الـ 30 يوم الجاية** |\n| `upcoming` | قائمة اللي هيجددوا، مرتّبة بـ `daysLeft` تصاعدياً |\n\n#### 4️⃣ `funnel` — قمع التحويل\n```js\nenteredTrial   = كل اليوزرز\ncompletedTrial = اللي trial بتاعهم خلص\nconverted      = اللي مش trial دلوقتي\nnotConverted   = max(0, completedTrial - converted)\n```\n> ⚠️ `notConverted` فيه `Math.max(0, ...)` عشان يمنع أرقام سالبة — علامة إن المنطق نفسه مش دقيق 100%.\n\n#### 5️⃣ `atRisk` — عملاء في خطر\nاللي باقي على اشتراكهم **≤ 7 أيام**، مرتّبين بالأقرب. **دي قائمة الاتصال بتاعت فريق المبيعات.**\n\n#### 6️⃣ `churned` — العملاء المفقودين\n| المجموعة | المعيار |\n|---|---|\n| `recent` | خلص خلال آخر **30 يوم** — فرصة استرجاع قوية |\n| `old` | خلص من أكتر من 30 يوم |\n\n#### 7️⃣ `featureUsage` — استخدام المميزات\nبيستخدم `.distinct(\"user\")` على كل كوليكشن عشان يعرف كام يوزر نشط بيستخدم كل ميزة، والنسبة من إجمالي النشطين.\n> 🔎 \"الداشبورد\" دايماً **100%** لأنها متحطوطة ثابتة في الكود (`count: active, pct: 100`) — مش قياس حقيقي.\n\n#### 8️⃣ `heatmap` — خريطة النشاط\n**168 خانة** (7 أيام × 24 ساعة) بتعدّ الإيرادات والمصاريف المسجّلة في آخر **90 يوم**.\n```js\nconst k = `${d.getDay()}-${d.getHours()}`;   // day: 0=الأحد, hour: 0-23\n```\n`maxHeat` = أعلى قيمة (بحد أدنى 1) — عشان تعمل بيها normalization للألوان.\n> ⚠️ بيستخدم `createdAt` (وقت تسجيل العملية في السيستم) مش `date` (تاريخ العملية نفسها) — وده **صح** لأننا بنقيس نشاط المستخدم مش توقيت مصاريفه.\n> ⚠️ الساعات بتوقيت **السيرفر** — لو السيرفر UTC والمستخدمين في مصر، فيه فرق ساعتين/3 ساعات.\n\n#### 9️⃣ `recentLogs`\nآخر **5** عمليات أدمن، مع أسماء جاهزة. لو الأدمن `null` بيكتب `\"النظام\"`.\n\n### ⚡ ملاحظات أداء\n- **10 كويريز بالتوازي** بـ `Promise.all` — كويس. 👍\n- بس بيجيب **كل** اليوزرز بـ `.lean()` وبيحسب في الذاكرة.\n- ⚠️ `User.find({}).select(\"-password\")` بترجّع `avatar` (base64) كمان — ممكن **مئات الميجابايت** لو الناس رافعة صور!\n> 🎯 **تحدّي:** ضيف `.select(\"-password -avatar\")` وشوف الفرق في زمن الاستجابة.\n\n---\n### 🔐 توثيق الأدمن (adminAuth)\nالطلب ده محتاج **توكن أدمن** — مش توكن مستخدم عادي.\n\nالميدل وير `adminAuth` بيعمل حاجتين:\n```js\nconst payload = jwt.verify(token, process.env.JWT_SECRET);\nif (payload.role !== \"admin\") return 403;\n```\n1. بيتأكد إن التوكن صالح.\n2. **بيتأكد إن `payload.role === \"admin\"`** ← ده اللي بيفرّق بين الأدمن واليوزر العادي.\n\n| الحالة | الكود | الرسالة |\n|---|---|---|\n| مفيش هيدر `Authorization` | `401` | `Unauthorized` |\n| التوكن غلط/منتهي | `401` | `Invalid token` |\n| توكن **مستخدم عادي** | `403` | `Forbidden` |\n\n> ⏱️ **مهم:** توكن الأدمن صلاحيته **30 دقيقة بس** (مقارنة بـ 24 ساعة / 30 يوم للمستخدم العادي).\n> لو جالك `401` فجأة وسط الشغل، اعمل **Admin Login** تاني.\n\nالكولكشن ده مظبوط على `Bearer {{adminToken}}` أوتوماتيك.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
